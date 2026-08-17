@@ -6,16 +6,25 @@ import PracticeScreen from './components/PracticeScreen';
 import ResultScreen from './components/ResultScreen';
 import DetailedReview from './components/DetailedReview';
 import HistoryModal from './components/HistoryModal';
+import AiConfigModal from './components/AiConfigModal';
+import AiLoadingScreen from './components/AiLoadingScreen';
 import { storage } from './utils/storage';
 import { soundManager } from './utils/audio';
+import { generateAIQuestions, aiConfig } from './services/aiQuestionGenerator';
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState('dashboard'); // 'dashboard' | 'exam' | 'practice' | 'result' | 'review'
+  const [currentScreen, setCurrentScreen] = useState('dashboard'); // 'dashboard' | 'loading' | 'exam' | 'practice' | 'result' | 'review'
+  const [targetMode, setTargetMode] = useState(null); // 'exam' | 'practice'
   const [selectedSubject, setSelectedSubject] = useState(null);
+  const [generatedQuestions, setGeneratedQuestions] = useState([]);
   const [examResult, setExamResult] = useState(null);
   const [darkMode, setDarkMode] = useState(() => storage.getTheme() === 'dark');
   const [soundEnabled, setSoundEnabled] = useState(true);
+  
+  // Modals & AI State
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isAiConfigOpen, setIsAiConfigOpen] = useState(false);
+  const [aiError, setAiError] = useState(null);
 
   // Sync Dark mode to document class
   useEffect(() => {
@@ -28,21 +37,48 @@ export default function App() {
     }
   }, [darkMode]);
 
-  // Screen Transitions
-  const handleStartExam = (subject) => {
+  // Request fresh AI questions for a subject
+  const loadSubjectQuestions = async (subject, mode) => {
     setSelectedSubject(subject);
-    setCurrentScreen('exam');
+    setTargetMode(mode);
+    setAiError(null);
+    setCurrentScreen('loading');
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    // Check if API Key exists
+    const apiKey = aiConfig.getApiKey();
+    if (!apiKey) {
+      setAiError('MISSING_API_KEY');
+      setIsAiConfigOpen(true);
+      return;
+    }
+
+    try {
+      const questions = await generateAIQuestions(subject.id, 30);
+      setGeneratedQuestions(questions);
+      setCurrentScreen(mode);
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      console.error('AI Generation Error:', err);
+      setAiError(err.message || 'প্রশ্ন তৈরিতে সমস্যা হয়েছে।');
+    }
+  };
+
+  const handleStartExam = (subject) => {
+    loadSubjectQuestions(subject, 'exam');
   };
 
   const handleStartPractice = (subject) => {
-    setSelectedSubject(subject);
-    setCurrentScreen('practice');
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    loadSubjectQuestions(subject, 'practice');
+  };
+
+  const handleRetryAi = () => {
+    if (selectedSubject && targetMode) {
+      loadSubjectQuestions(selectedSubject, targetMode);
+    }
   };
 
   const handleFinishExam = (result) => {
-    // Save to LocalStorage
     storage.saveResult(result);
     setExamResult(result);
     setCurrentScreen('result');
@@ -57,13 +93,14 @@ export default function App() {
     }
     setCurrentScreen('dashboard');
     setSelectedSubject(null);
+    setGeneratedQuestions([]);
+    setAiError(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleRetakeExam = () => {
     if (selectedSubject) {
-      setCurrentScreen('exam');
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+      loadSubjectQuestions(selectedSubject, 'exam');
     } else {
       handleGoHome();
     }
@@ -81,6 +118,7 @@ export default function App() {
         currentScreen={currentScreen}
         onGoHome={handleGoHome}
         onOpenHistory={() => setIsHistoryOpen(true)}
+        onOpenAiConfig={() => setIsAiConfigOpen(true)}
       />
 
       {/* Main Screen Content */}
@@ -89,12 +127,24 @@ export default function App() {
           <SubjectDashboard
             onStartExam={handleStartExam}
             onStartPractice={handleStartPractice}
+            onOpenAiConfig={() => setIsAiConfigOpen(true)}
+          />
+        )}
+
+        {currentScreen === 'loading' && selectedSubject && (
+          <AiLoadingScreen
+            subject={selectedSubject}
+            error={aiError}
+            onCancel={handleGoHome}
+            onRetry={handleRetryAi}
+            onOpenSettings={() => setIsAiConfigOpen(true)}
           />
         )}
 
         {currentScreen === 'exam' && selectedSubject && (
           <ExamScreen
             subject={selectedSubject}
+            questions={generatedQuestions}
             onFinishExam={handleFinishExam}
             onExitExam={handleGoHome}
             soundManager={soundManager}
@@ -104,6 +154,7 @@ export default function App() {
         {currentScreen === 'practice' && selectedSubject && (
           <PracticeScreen
             subject={selectedSubject}
+            questions={generatedQuestions}
             onExitPractice={handleGoHome}
             soundManager={soundManager}
           />
@@ -139,14 +190,25 @@ export default function App() {
         onClose={() => setIsHistoryOpen(false)}
       />
 
+      {/* AI Configuration Modal */}
+      <AiConfigModal
+        isOpen={isAiConfigOpen}
+        onClose={() => setIsAiConfigOpen(false)}
+        onSave={() => {
+          if (currentScreen === 'loading' && selectedSubject) {
+            handleRetryAi();
+          }
+        }}
+      />
+
       {/* Footer */}
       <footer className="mt-auto border-t border-slate-200/80 dark:border-slate-800/80 py-6 text-center text-xs text-slate-500 dark:text-slate-400 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 space-y-2">
           <p className="font-semibold text-slate-700 dark:text-slate-300">
-            এসএসসি (Class 10) পূর্ণাঙ্গ প্রস্তুতি ও মডেল টেস্ট প্ল্যাটফর্ম — সর্বস্বত্ব সংরক্ষিত © {new Date().getFullYear()}
+            এসএসসি (Class 10) লাইভ এআই প্রস্তুতি ও মডেল টেস্ট প্ল্যাটফর্ম — সর্বস্বত্ব সংরক্ষিত © {new Date().getFullYear()}
           </p>
           <p className="text-[11px] text-slate-400">
-            জাতীয় শিক্ষাক্রম ও পাঠ্যপুস্তক বোর্ড (NCTB) অনুমোদিত ২৩টি বিষয়ের সর্বশেষ সিলেবাস ও মানবন্টন অনুযায়ী প্রণীত।
+            Google Gemini 3.7 / 2.5 Flash এআই চালিত অন-ডিমান্ড ও নন-রিপিটিং বোর্ড স্ট্যান্ডার্ড প্রশ্ন ব্যাংক।
           </p>
         </div>
       </footer>

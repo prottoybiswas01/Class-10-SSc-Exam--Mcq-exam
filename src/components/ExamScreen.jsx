@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ArrowLeft, 
   ArrowRight, 
@@ -7,31 +7,27 @@ import {
   Bookmark, 
   Send, 
   AlertCircle, 
-  HelpCircle,
-  Eye,
   Sliders
 } from 'lucide-react';
 import QuestionCard from './QuestionCard';
 import Timer from './Timer';
-import { getQuestionsBySubject } from '../data/questions';
 import { toBengaliNumber } from '../utils/gradeCalculator';
 
 const EXAM_DURATION_SECONDS = 30 * 60; // 30 minutes
 
 export default function ExamScreen({
   subject,
+  questions = [],
   onFinishExam,
   onExitExam,
   soundManager
 }) {
-  const questions = useRef(getQuestionsBySubject(subject.id)).current;
   const [currentIndex, setCurrentIndex] = useState(0);
   const [answers, setAnswers] = useState({}); // { [qIdx]: selectedOptionIdx }
   const [bookmarks, setBookmarks] = useState({}); // { [qId]: true/false }
   const [secondsLeft, setSecondsLeft] = useState(EXAM_DURATION_SECONDS);
   const [isSubmitModalOpen, setIsSubmitModalOpen] = useState(false);
   const [negativeMarking, setNegativeMarking] = useState(false);
-  const [isDrawerOpen, setIsDrawerOpen] = useState(false);
 
   // Countdown timer
   useEffect(() => {
@@ -115,9 +111,20 @@ export default function ExamScreen({
     onFinishExam(examResult);
   };
 
-  const currentQuestion = questions[currentIndex];
+  const currentQuestion = questions[currentIndex] || questions[0];
   const answeredCount = Object.keys(answers).length;
   const markedCount = Object.values(bookmarks).filter(Boolean).length;
+
+  if (!questions || questions.length === 0) {
+    return (
+      <div className="max-w-4xl mx-auto p-8 text-center glass-card rounded-2xl">
+        <h3 className="text-base font-bold text-slate-800 dark:text-slate-200">কোনো প্রশ্ন পাওয়া যায়নি।</h3>
+        <button onClick={onExitExam} className="mt-4 px-4 py-2 bg-slate-900 text-white rounded-xl text-xs font-bold">
+          ফিরে যান
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5 space-y-6">
@@ -267,7 +274,7 @@ export default function ExamScreen({
             <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <h3 className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5">
                 <CheckSquare className="w-4 h-4 text-emerald-600" />
-                <span>প্রশ্ন প্যালেট (১-৩০)</span>
+                <span>প্রশ্ন প্যালেট (১-{toBengaliNumber(questions.length)})</span>
               </h3>
             </div>
 
