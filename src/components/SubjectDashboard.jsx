@@ -30,10 +30,7 @@ import {
   Sprout, 
   Home,
   Play,
-  Lightbulb,
-  Award,
-  KeyRound,
-  Zap
+  Lightbulb
 } from 'lucide-react';
 import { SUBJECTS, SUBJECT_GROUPS, GROUP_LABELS } from '../data/subjects';
 import { toBengaliNumber } from '../utils/gradeCalculator';
@@ -65,7 +62,7 @@ const ICON_MAP = {
   Home
 };
 
-export default function SubjectDashboard({ onStartExam, onStartPractice, onOpenAiConfig }) {
+export default function SubjectDashboard({ onStartExam, onStartPractice }) {
   const [selectedGroup, setSelectedGroup] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -103,17 +100,17 @@ export default function SubjectDashboard({ onStartExam, onStartPractice, onOpenA
             
             <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-indigo-500/30 backdrop-blur-md border border-indigo-400/40 text-xs font-semibold text-indigo-100">
               <Sparkles className="w-3.5 h-3.5 text-indigo-300" />
-              <span>Gemini AI অন-ডিমান্ড জেনারেশন</span>
+              <span>লাইভ প্রশ্ন জেনারেশন</span>
             </div>
           </div>
 
           <h1 className="text-2xl sm:text-4xl lg:text-5xl font-black tracking-tight leading-tight">
             ১০ম শ্রেণি ও এসএসসি প্রস্তুতি — <br className="hidden sm:inline" />
-            <span className="text-emerald-300">২৩টি বিষয়ের</span> পূর্ণাঙ্গ AI মডেল টেস্ট
+            <span className="text-emerald-300">২৩টি বিষয়ের</span> পূর্ণাঙ্গ মডেল টেস্ট ও অনুশীলন
           </h1>
 
           <p className="text-sm sm:text-base text-emerald-100/90 leading-relaxed max-w-2xl">
-            জাতীয় শিক্ষাক্রম ও পাঠ্যপুস্তক বোর্ড (NCTB) অনুমোদিত বিজ্ঞান, ব্যবসায় শিক্ষা, মানবিক ও সকল আবশ্যিক বিষয়ের ওপর Gemini AI দ্বারা তাৎক্ষণিক তৈরি ইউনিক প্রশ্ন দিয়ে পরীক্ষা দিন।
+            জাতীয় শিক্ষাক্রম ও পাঠ্যপুস্তক বোর্ড (NCTB) অনুমোদিত বিজ্ঞান, ব্যবসায় শিক্ষা, মানবিক ও সকল আবশ্যিক বিষয়ের ওপর সম্পূর্ণ বই বা নির্দিষ্ট অধ্যায়ভিত্তিক ইউনিক প্রশ্ন দিয়ে পরীক্ষা দিন।
           </p>
 
           {/* Quick Metrics Bar */}
@@ -130,13 +127,6 @@ export default function SubjectDashboard({ onStartExam, onStartPractice, onOpenA
               <Trophy className="w-4 h-4 text-yellow-300" />
               <span>GPA 5.0 স্ট্যান্ডার্ড রেজাল্ট</span>
             </div>
-            <button
-              onClick={onOpenAiConfig}
-              className="flex items-center gap-2 bg-indigo-600 hover:bg-indigo-700 px-3.5 py-2 rounded-xl text-white font-bold shadow-lg transition-colors cursor-pointer"
-            >
-              <KeyRound className="w-4 h-4" />
-              <span>AI সেটিংস / API Key</span>
-            </button>
           </div>
 
         </div>
@@ -244,7 +234,7 @@ export default function SubjectDashboard({ onStartExam, onStartPractice, onOpenA
                 <div className="mt-5 pt-4 border-t border-slate-100 dark:border-slate-800/80 grid grid-cols-2 gap-2">
                   <button
                     onClick={() => onStartPractice(subject)}
-                    className="w-full py-2 px-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-emerald-500/50 bg-white/50 dark:bg-slate-800/50 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-slate-700 dark:text-slate-300 hover:text-emerald-600 text-xs font-bold transition-all flex items-center justify-center gap-1"
+                    className="w-full py-2.5 px-3 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-emerald-500/50 bg-white/50 dark:bg-slate-800/50 hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-slate-700 dark:text-slate-300 hover:text-emerald-600 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
                   >
                     <Lightbulb className="w-3.5 h-3.5 text-amber-500" />
                     <span>অনুশীলন</span>
@@ -252,7 +242,7 @@ export default function SubjectDashboard({ onStartExam, onStartPractice, onOpenA
 
                   <button
                     onClick={() => onStartExam(subject)}
-                    className="w-full py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 hover:shadow-emerald-600/30 transition-all flex items-center justify-center gap-1 active:scale-95"
+                    className="w-full py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-bold shadow-md shadow-emerald-600/20 hover:shadow-emerald-600/30 transition-all flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer"
                   >
                     <Play className="w-3.5 h-3.5 fill-current" />
                     <span>মডেল টেস্ট</span>

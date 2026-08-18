@@ -8,8 +8,7 @@ import {
   VolumeX, 
   BookOpen, 
   Sparkles,
-  ArrowLeft,
-  KeyRound
+  ArrowLeft
 } from 'lucide-react';
 import { soundManager } from '../utils/audio';
 
@@ -21,7 +20,7 @@ export default function Navbar({
   currentScreen, 
   onGoHome, 
   onOpenHistory,
-  onOpenAiConfig
+  onOpenAiSettings
 }) {
   const toggleSound = () => {
     const newState = soundManager.toggleSound(!soundEnabled);
@@ -59,11 +58,11 @@ export default function Navbar({
                 </span>
                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-indigo-100 dark:bg-indigo-950/80 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
                   <Sparkles className="w-3 h-3 text-indigo-500" />
-                  Gemini AI
+                  AI চালিত
                 </span>
               </div>
               <p className="text-[11px] text-slate-500 dark:text-slate-400 hidden md:block">
-                NCTB সিলেবাসভিত্তিক লাইভ এআই প্রশ্ন ও পূর্ণাঙ্গ মডেল টেস্ট
+                NCTB সিলেবাসভিত্তিক লাইভ প্রশ্ন ও পূর্ণাঙ্গ মডেল টেস্ট
               </p>
             </div>
           </div>
@@ -71,14 +70,14 @@ export default function Navbar({
 
         {/* Right Action Icons */}
         <div className="flex items-center gap-1.5 sm:gap-2">
-          {/* AI Key & Model Settings */}
+          {/* AI Settings Button */}
           <button
-            onClick={onOpenAiConfig}
-            className="px-2.5 py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-900 border border-indigo-200 dark:border-indigo-800 transition-colors flex items-center gap-1.5 text-xs font-bold"
-            title="Gemini API Key এবং মডেল সেটিংস"
+            onClick={onOpenAiSettings}
+            className="p-2 sm:px-3 sm:py-1.5 rounded-xl bg-indigo-50 dark:bg-indigo-950/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 text-indigo-600 dark:text-indigo-300 border border-indigo-200/80 dark:border-indigo-800 transition-colors flex items-center gap-1.5 text-xs font-bold shadow-sm"
+            title="Gemini AI API Key সেটিংস"
           >
-            <KeyRound className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
-            <span className="hidden sm:inline">AI সেটিংস</span>
+            <Sparkles className="w-4 h-4 text-indigo-500" />
+            <span className="hidden sm:inline">AI Settings</span>
           </button>
 
           {/* Official NCTB Link */}

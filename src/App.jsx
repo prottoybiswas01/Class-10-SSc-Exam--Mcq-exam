@@ -6,25 +6,28 @@ import PracticeScreen from './components/PracticeScreen';
 import ResultScreen from './components/ResultScreen';
 import DetailedReview from './components/DetailedReview';
 import HistoryModal from './components/HistoryModal';
-import AiConfigModal from './components/AiConfigModal';
+import ChapterSelectModal from './components/ChapterSelectModal';
 import AiLoadingScreen from './components/AiLoadingScreen';
+import AiSettingsModal from './components/AiSettingsModal';
 import { storage } from './utils/storage';
 import { soundManager } from './utils/audio';
-import { generateAIQuestions, aiConfig } from './services/aiQuestionGenerator';
+import { generateAIQuestions } from './services/aiQuestionGenerator';
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState('dashboard'); // 'dashboard' | 'loading' | 'exam' | 'practice' | 'result' | 'review'
-  const [targetMode, setTargetMode] = useState(null); // 'exam' | 'practice'
   const [selectedSubject, setSelectedSubject] = useState(null);
+  const [targetMode, setTargetMode] = useState('exam'); // 'exam' | 'practice'
   const [generatedQuestions, setGeneratedQuestions] = useState([]);
   const [examResult, setExamResult] = useState(null);
   const [darkMode, setDarkMode] = useState(() => storage.getTheme() === 'dark');
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [generationError, setGenerationError] = useState(null);
   
-  // Modals & AI State
+  // Modals
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
-  const [isAiConfigOpen, setIsAiConfigOpen] = useState(false);
-  const [aiError, setAiError] = useState(null);
+  const [isChapterModalOpen, setIsChapterModalOpen] = useState(false);
+  const [isAiSettingsOpen, setIsAiSettingsOpen] = useState(false);
+  const [activeSessionConfig, setActiveSessionConfig] = useState(null);
 
   // Sync Dark mode to document class
   useEffect(() => {
@@ -37,44 +40,34 @@ export default function App() {
     }
   }, [darkMode]);
 
-  // Request fresh AI questions for a subject
-  const loadSubjectQuestions = async (subject, mode) => {
+  // Clicked from Dashboard
+  const handleOpenSubjectModal = (subject, mode) => {
     setSelectedSubject(subject);
     setTargetMode(mode);
-    setAiError(null);
+    setIsChapterModalOpen(true);
+  };
+
+  // Confirmed from Chapter/Syllabus Modal
+  const handleConfirmStart = async (config) => {
+    setIsChapterModalOpen(false);
+    setActiveSessionConfig(config);
+    setGenerationError(null);
     setCurrentScreen('loading');
     window.scrollTo({ top: 0, behavior: 'smooth' });
 
-    // Check if API Key exists
-    const apiKey = aiConfig.getApiKey();
-    if (!apiKey) {
-      setAiError('MISSING_API_KEY');
-      setIsAiConfigOpen(true);
-      return;
-    }
-
     try {
-      const questions = await generateAIQuestions(subject.id, 30);
+      const questions = await generateAIQuestions(
+        config.subject.id,
+        config.questionCount,
+        config.chapters,
+        config.isFullBook
+      );
       setGeneratedQuestions(questions);
-      setCurrentScreen(mode);
+      setCurrentScreen(config.mode);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (err) {
-      console.error('AI Generation Error:', err);
-      setAiError(err.message || 'প্রশ্ন তৈরিতে সমস্যা হয়েছে।');
-    }
-  };
-
-  const handleStartExam = (subject) => {
-    loadSubjectQuestions(subject, 'exam');
-  };
-
-  const handleStartPractice = (subject) => {
-    loadSubjectQuestions(subject, 'practice');
-  };
-
-  const handleRetryAi = () => {
-    if (selectedSubject && targetMode) {
-      loadSubjectQuestions(selectedSubject, targetMode);
+      console.error('Generation Error:', err);
+      setGenerationError(err.message || 'AI প্রশ্ন জেনারেট করতে ব্যর্থ হয়েছে। দয়া করে আপনার API Key চেক করুন।');
     }
   };
 
@@ -94,13 +87,14 @@ export default function App() {
     setCurrentScreen('dashboard');
     setSelectedSubject(null);
     setGeneratedQuestions([]);
-    setAiError(null);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleRetakeExam = () => {
-    if (selectedSubject) {
-      loadSubjectQuestions(selectedSubject, 'exam');
+    if (activeSessionConfig) {
+      handleConfirmStart(activeSessionConfig);
+    } else if (selectedSubject) {
+      handleOpenSubjectModal(selectedSubject, 'exam');
     } else {
       handleGoHome();
     }
@@ -118,26 +112,25 @@ export default function App() {
         currentScreen={currentScreen}
         onGoHome={handleGoHome}
         onOpenHistory={() => setIsHistoryOpen(true)}
-        onOpenAiConfig={() => setIsAiConfigOpen(true)}
+        onOpenAiSettings={() => setIsAiSettingsOpen(true)}
       />
 
       {/* Main Screen Content */}
       <main className="flex-1">
         {currentScreen === 'dashboard' && (
           <SubjectDashboard
-            onStartExam={handleStartExam}
-            onStartPractice={handleStartPractice}
-            onOpenAiConfig={() => setIsAiConfigOpen(true)}
+            onStartExam={(sub) => handleOpenSubjectModal(sub, 'exam')}
+            onStartPractice={(sub) => handleOpenSubjectModal(sub, 'practice')}
           />
         )}
 
         {currentScreen === 'loading' && selectedSubject && (
           <AiLoadingScreen
             subject={selectedSubject}
-            error={aiError}
+            error={generationError}
+            onRetry={() => activeSessionConfig && handleConfirmStart(activeSessionConfig)}
+            onOpenSettings={() => setIsAiSettingsOpen(true)}
             onCancel={handleGoHome}
-            onRetry={handleRetryAi}
-            onOpenSettings={() => setIsAiConfigOpen(true)}
           />
         )}
 
@@ -184,19 +177,28 @@ export default function App() {
         )}
       </main>
 
+      {/* Chapter / Full Book Selection Modal */}
+      <ChapterSelectModal
+        isOpen={isChapterModalOpen}
+        onClose={() => setIsChapterModalOpen(false)}
+        subject={selectedSubject}
+        mode={targetMode}
+        onConfirm={handleConfirmStart}
+      />
+
       {/* History Modal */}
       <HistoryModal
         isOpen={isHistoryOpen}
         onClose={() => setIsHistoryOpen(false)}
       />
 
-      {/* AI Configuration Modal */}
-      <AiConfigModal
-        isOpen={isAiConfigOpen}
-        onClose={() => setIsAiConfigOpen(false)}
-        onSave={() => {
-          if (currentScreen === 'loading' && selectedSubject) {
-            handleRetryAi();
+      {/* AI Settings Modal */}
+      <AiSettingsModal
+        isOpen={isAiSettingsOpen}
+        onClose={() => setIsAiSettingsOpen(false)}
+        onKeySaved={() => {
+          if (generationError && activeSessionConfig) {
+            handleConfirmStart(activeSessionConfig);
           }
         }}
       />
@@ -205,10 +207,10 @@ export default function App() {
       <footer className="mt-auto border-t border-slate-200/80 dark:border-slate-800/80 py-6 text-center text-xs text-slate-500 dark:text-slate-400 bg-white/50 dark:bg-slate-900/50 backdrop-blur-sm">
         <div className="max-w-7xl mx-auto px-4 space-y-2">
           <p className="font-semibold text-slate-700 dark:text-slate-300">
-            এসএসসি (Class 10) লাইভ এআই প্রস্তুতি ও মডেল টেস্ট প্ল্যাটফর্ম — সর্বস্বত্ব সংরক্ষিত © {new Date().getFullYear()}
+            এসএসসি (Class 10) পূর্ণাঙ্গ প্রস্তুতি ও মডেল টেস্ট প্ল্যাটফর্ম — সর্বস্বত্ব সংরক্ষিত © {new Date().getFullYear()}
           </p>
           <p className="text-[11px] text-slate-400">
-            Google Gemini 3.7 / 2.5 Flash এআই চালিত অন-ডিমান্ড ও নন-রিপিটিং বোর্ড স্ট্যান্ডার্ড প্রশ্ন ব্যাংক।
+            জাতীয় শিক্ষাক্রম ও পাঠ্যপুস্তক বোর্ড (NCTB) অনুমোদিত ২৩টি বিষয়ের সর্বশেষ কারিকুলাম ও অধ্যায় অনুযায়ী প্রণীত।
           </p>
         </div>
       </footer>
