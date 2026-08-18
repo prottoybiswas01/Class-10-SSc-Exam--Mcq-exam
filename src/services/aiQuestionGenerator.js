@@ -18,40 +18,59 @@ export async function generateAIQuestions(subjectId, count = 30, selectedChapter
     ? selectedChapters
     : syllabusInfo.chapters;
 
-  const geminiKey = localStorage.getItem('ssc_mcq_gemini_api_key_v1') || import.meta.env.VITE_GEMINI_API_KEY || '';
-  const cfToken = localStorage.getItem('ssc_mcq_cf_token_v1') || import.meta.env.VITE_CLOUDFLARE_AI_TOKEN || '';
-  const cfAccountId = localStorage.getItem('ssc_mcq_cf_account_id_v1') || import.meta.env.VITE_CLOUDFLARE_ACCOUNT_ID || DEFAULT_CF_ACCOUNT_ID;
-  const cfGateway = localStorage.getItem('ssc_mcq_cf_gateway_v1') || import.meta.env.VITE_CLOUDFLARE_GATEWAY_NAME || DEFAULT_CF_GATEWAY_ID;
+  // Retrieve stored keys
+  let rawGeminiKey = (localStorage.getItem('ssc_mcq_gemini_api_key_v1') || import.meta.env.VITE_GEMINI_API_KEY || '').trim();
+  let rawCfToken = (localStorage.getItem('ssc_mcq_cf_token_v1') || import.meta.env.VITE_CLOUDFLARE_AI_TOKEN || '').trim();
+  const cfAccountId = (localStorage.getItem('ssc_mcq_cf_account_id_v1') || import.meta.env.VITE_CLOUDFLARE_ACCOUNT_ID || DEFAULT_CF_ACCOUNT_ID).trim();
+  const cfGateway = (localStorage.getItem('ssc_mcq_cf_gateway_v1') || import.meta.env.VITE_CLOUDFLARE_GATEWAY_NAME || DEFAULT_CF_GATEWAY_ID).trim();
+
+  // Smart Auto-Routing:
+  // If user stored a Cloudflare token (starts with cfut_) inside Gemini key slot, fix it:
+  if (rawGeminiKey.startsWith('cfut_') && !rawCfToken) {
+    rawCfToken = rawGeminiKey;
+    rawGeminiKey = '';
+  }
+
+  // If user stored a Google AI Studio key (starts with AIzaSy) inside Cloudflare slot, fix it:
+  if (rawCfToken.startsWith('AIzaSy') && !rawGeminiKey) {
+    rawGeminiKey = rawCfToken;
+    rawCfToken = '';
+  }
 
   const prompt = createExamPrompt(syllabusInfo, targetChapters, count);
 
   let questions = null;
+  let lastError = null;
 
-  // 1. Try Cloudflare Workers AI / Gateway if token exists
-  if (cfToken && cfToken.trim()) {
+  // 1. Try Cloudflare Workers AI if token exists
+  if (rawCfToken) {
     try {
-      questions = await fetchFromCloudflareAI(cfToken.trim(), cfAccountId, cfGateway, prompt);
+      questions = await fetchFromCloudflareAI(rawCfToken, cfAccountId, cfGateway, prompt);
     } catch (err) {
       console.warn('Cloudflare AI Error:', err);
+      lastError = err;
     }
   }
 
-  // 2. Try Direct Google Gemini API if key is present
-  if (!questions && geminiKey && geminiKey.trim()) {
+  // 2. Try Direct Google Gemini API ONLY if valid Google key exists (starts with AIzaSy or not cfut_)
+  if (!questions && rawGeminiKey && !rawGeminiKey.startsWith('cfut_')) {
     try {
-      questions = await fetchFromGoogleGemini(geminiKey.trim(), prompt);
+      questions = await fetchFromGoogleGemini(rawGeminiKey, prompt);
     } catch (err) {
-      console.warn('Google Gemini API call error:', err);
-      throw err;
+      console.warn('Google Gemini API Error:', err);
+      lastError = err;
     }
   }
 
-  // 3. Fallback error message if no key or all attempts failed
+  // 3. Fallback error handling
   if (!questions) {
-    if (!cfToken && !geminiKey) {
-      throw new Error('MISSING_API_KEY: দয়া করে AI Settings থেকে আপনার API Key বা Cloudflare Token সেট করুন।');
+    if (!rawCfToken && !rawGeminiKey) {
+      throw new Error('MISSING_API_KEY: দয়া করে AI Settings থেকে আপনার Cloudflare API Token বা Google Gemini API Key দিন।');
     }
-    throw new Error('AI ইঞ্জিন থেকে প্রশ্ন তৈরিতে সমস্যা হয়েছে। অনুগ্রহ করে ইন্টারনেট সংযোগ ও API সেটিংস চেক করে আবার চেষ্টা করুন।');
+    if (lastError) {
+      throw lastError;
+    }
+    throw new Error('AI ইঞ্জিন থেকে প্রশ্ন তৈরিতে সমস্যা হয়েছে। অনুগ্রহ করে API Settings চেক করে আবার চেষ্টা করুন।');
   }
 
   return sanitizeAndFormatQuestions(questions.slice(0, count), syllabusInfo);
@@ -114,16 +133,17 @@ async function fetchFromCloudflareAI(token, accountId, gatewayId, prompt) {
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`Cloudflare API Error (${response.status}): ${errText}`);
+    throw new Error(`Cloudflare AI Error (${response.status}): ${errText}`);
   }
 
   const data = await response.json();
   const rawText = data.result?.response || data.result?.choices?.[0]?.message?.content;
   if (rawText) {
-    return parseJsonResponse(rawText);
+    const parsed = parseJsonResponse(rawText);
+    if (parsed && parsed.length > 0) return parsed;
   }
 
-  throw new Error('Cloudflare AI থেকে কোনো রেসপন্স পাওয়া যায়নি।');
+  throw new Error('Cloudflare AI থেকে সঠিক ফরম্যাটে রেসপন্স পাওয়া যায়নি।');
 }
 
 /**
@@ -137,13 +157,13 @@ async function fetchFromGoogleGemini(apiKey, prompt) {
     'gemini-2.5-flash',
     'gemini-2.0-flash',
     'gemini-1.5-flash'
-  ].filter((v, i, a) => a.indexOf(v) === i);
+  ].filter((v, i, a) => a.indexOf(v) === i && !v.startsWith('@cf/'));
 
   let lastError = null;
 
   for (const modelName of modelsToTry) {
     try {
-      const cleanModel = modelName.replace(/^google\//, '').replace(/^@cf\//, '');
+      const cleanModel = modelName.replace(/^google\//, '');
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${apiKey}`;
       const response = await fetch(url, {
         method: 'POST',
@@ -159,15 +179,17 @@ async function fetchFromGoogleGemini(apiKey, prompt) {
       });
 
       if (!response.ok) {
-        const errText = await response.text();
-        lastError = new Error(`Google API Error (${response.status}): ${errText}`);
+        const errData = await response.json().catch(() => null);
+        const errMsg = errData?.error?.message || response.statusText;
+        lastError = new Error(`Google API Error: ${errMsg}`);
         continue;
       }
 
       const data = await response.json();
       const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text;
       if (rawText) {
-        return parseJsonResponse(rawText);
+        const parsed = parseJsonResponse(rawText);
+        if (parsed && parsed.length > 0) return parsed;
       }
     } catch (err) {
       lastError = err;
@@ -183,7 +205,7 @@ async function fetchFromGoogleGemini(apiKey, prompt) {
 function parseJsonResponse(rawText) {
   let cleaned = rawText.trim();
 
-  // Strip code fences if present
+  // Strip markdown code fences
   const jsonMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
   if (jsonMatch) {
     cleaned = jsonMatch[1].trim();

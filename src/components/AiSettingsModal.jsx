@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, Key, Sparkles, CheckCircle2, AlertCircle, ExternalLink, Cpu, Cloud, ShieldCheck } from 'lucide-react';
+import { X, Key, Sparkles, CheckCircle2, AlertCircle, ExternalLink, Cpu, Cloud, ShieldCheck, RefreshCw } from 'lucide-react';
 
 export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
   const [provider, setProvider] = useState('cloudflare'); // 'google' | 'cloudflare'
@@ -8,24 +8,36 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
   const [cfAccountId, setCfAccountId] = useState('4856aab769ba28fe73b35aee65e3abc0');
   const [cfGateway, setCfGateway] = useState('default');
   const [selectedModel, setSelectedModel] = useState('@cf/meta/llama-3.1-8b-instruct');
+  
+  const [testLoading, setTestLoading] = useState(false);
+  const [testResult, setTestResult] = useState(null); // { success: boolean, message: string }
   const [savedStatus, setSavedStatus] = useState(null); // 'saved' | 'cleared' | null
 
   useEffect(() => {
     if (isOpen) {
-      const storedGemini = localStorage.getItem('ssc_mcq_gemini_api_key_v1') || import.meta.env.VITE_GEMINI_API_KEY || '';
-      const storedCfToken = localStorage.getItem('ssc_mcq_cf_token_v1') || import.meta.env.VITE_CLOUDFLARE_AI_TOKEN || '';
-      const storedCfAccount = localStorage.getItem('ssc_mcq_cf_account_id_v1') || import.meta.env.VITE_CLOUDFLARE_ACCOUNT_ID || '4856aab769ba28fe73b35aee65e3abc0';
-      const storedCfGateway = localStorage.getItem('ssc_mcq_cf_gateway_v1') || import.meta.env.VITE_CLOUDFLARE_GATEWAY_NAME || 'default';
-      const storedModel = localStorage.getItem('ssc_mcq_gemini_model_v1') || import.meta.env.VITE_AI_MODEL || '@cf/meta/llama-3.1-8b-instruct';
+      let storedGemini = (localStorage.getItem('ssc_mcq_gemini_api_key_v1') || import.meta.env.VITE_GEMINI_API_KEY || '').trim();
+      let storedCfToken = (localStorage.getItem('ssc_mcq_cf_token_v1') || import.meta.env.VITE_CLOUDFLARE_AI_TOKEN || '').trim();
+      const storedCfAccount = (localStorage.getItem('ssc_mcq_cf_account_id_v1') || import.meta.env.VITE_CLOUDFLARE_ACCOUNT_ID || '4856aab769ba28fe73b35aee65e3abc0').trim();
+      const storedCfGateway = (localStorage.getItem('ssc_mcq_cf_gateway_v1') || import.meta.env.VITE_CLOUDFLARE_GATEWAY_NAME || 'default').trim();
+      const storedModel = (localStorage.getItem('ssc_mcq_gemini_model_v1') || import.meta.env.VITE_AI_MODEL || '@cf/meta/llama-3.1-8b-instruct').trim();
+
+      // Auto-migrate misplaced cfut_ token
+      if (storedGemini.startsWith('cfut_') && !storedCfToken) {
+        storedCfToken = storedGemini;
+        storedGemini = '';
+        localStorage.removeItem('ssc_mcq_gemini_api_key_v1');
+        localStorage.setItem('ssc_mcq_cf_token_v1', storedCfToken);
+      }
 
       setGeminiKey(storedGemini);
       setCfToken(storedCfToken);
       setCfAccountId(storedCfAccount);
       setCfGateway(storedCfGateway);
       setSelectedModel(storedModel);
+      setTestResult(null);
       setSavedStatus(null);
 
-      if (storedCfToken || storedCfAccount) {
+      if (storedCfToken) {
         setProvider('cloudflare');
       } else if (storedGemini) {
         setProvider('google');
@@ -34,6 +46,78 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
   }, [isOpen]);
 
   if (!isOpen) return null;
+
+  // Auto-switch provider on input change
+  const handleGeminiInput = (val) => {
+    setGeminiKey(val);
+    if (val.trim().startsWith('cfut_')) {
+      setCfToken(val.trim());
+      setGeminiKey('');
+      setProvider('cloudflare');
+    }
+  };
+
+  const handleCfInput = (val) => {
+    setCfToken(val);
+    if (val.trim().startsWith('AIzaSy')) {
+      setGeminiKey(val.trim());
+      setCfToken('');
+      setProvider('google');
+    }
+  };
+
+  // Test live connection
+  const handleTestConnection = async () => {
+    setTestLoading(true);
+    setTestResult(null);
+
+    try {
+      if (provider === 'cloudflare') {
+        const token = cfToken.trim();
+        if (!token) throw new Error('Cloudflare API Token দিন।');
+        
+        const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/${selectedModel}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`,
+            'cf-aig-gateway-id': cfGateway
+          },
+          body: JSON.stringify({
+            max_tokens: 50,
+            messages: [{ role: 'user', content: 'Say "OK" in Bengali' }]
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.text();
+          throw new Error(`Cloudflare Error (${res.status}): ${err}`);
+        }
+        setTestResult({ success: true, message: 'Cloudflare AI সফলভাবে কানেক্টেড ও সচল!' });
+      } else {
+        const key = geminiKey.trim();
+        if (!key) throw new Error('Google Gemini API Key দিন।');
+
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ role: 'user', parts: [{ text: 'Say OK' }] }]
+          })
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error?.message || `Google API Error (${res.status})`);
+        }
+        setTestResult({ success: true, message: 'Google Gemini AI সফলভাবে কানেক্টেড ও সচল!' });
+      }
+    } catch (err) {
+      setTestResult({ success: false, message: err.message });
+    } finally {
+      setTestLoading(false);
+    }
+  };
 
   const handleSave = () => {
     if (provider === 'google') {
@@ -65,6 +149,7 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
     localStorage.removeItem('ssc_mcq_cf_gateway_v1');
     setGeminiKey('');
     setCfToken('');
+    setTestResult(null);
     setSavedStatus('cleared');
     if (onKeySaved) onKeySaved('');
   };
@@ -91,7 +176,7 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
               AI Engine & API Key সেটিংস
             </h3>
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              সরাসরি AI দ্বারা আনকমন ও ইউনিক প্রশ্ন তৈরির কনফিগারেশন
+              সরাসরি AI দ্বারা আনকমন ও বোর্ড স্ট্যান্ডার্ড প্রশ্ন তৈরির কনফিগারেশন
             </p>
           </div>
         </div>
@@ -100,7 +185,7 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
         <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 dark:bg-slate-900 rounded-2xl">
           <button
             type="button"
-            onClick={() => setProvider('cloudflare')}
+            onClick={() => { setProvider('cloudflare'); setSelectedModel('@cf/meta/llama-3.1-8b-instruct'); }}
             className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
               provider === 'cloudflare'
                 ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
@@ -113,7 +198,7 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
 
           <button
             type="button"
-            onClick={() => setProvider('google')}
+            onClick={() => { setProvider('google'); setSelectedModel('gemini-2.5-flash'); }}
             className={`py-2 px-3 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
               provider === 'google'
                 ? 'bg-white dark:bg-slate-800 text-indigo-600 dark:text-indigo-400 shadow-sm'
@@ -131,10 +216,10 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
             <div className="p-3 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/50 text-xs text-indigo-900 dark:text-indigo-200 space-y-1">
               <div className="font-bold flex items-center gap-1.5">
                 <Cloud className="w-4 h-4 text-indigo-600" />
-                <span>Cloudflare Workers AI (Verified & Ready)</span>
+                <span>Cloudflare Workers AI</span>
               </div>
               <p className="text-[11px] leading-relaxed">
-                আপনার ক্লাউডফ্লেয়ার টোকেন নিচে পেস্ট করুন। অ্যাকাউন্ট ও গেটওয়ে আইডি স্বয়ংক্রিয়ভাবে সেট করা আছে।
+                আপনার ক্লাউডফ্লেয়ার টোকেন (`cfut_...`) নিচে দিন।
               </p>
             </div>
 
@@ -150,7 +235,7 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
               <input
                 type="password"
                 value={cfToken}
-                onChange={(e) => setCfToken(e.target.value)}
+                onChange={(e) => handleCfInput(e.target.value)}
                 placeholder="cfut_..."
                 className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
               />
@@ -159,7 +244,7 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
             <div className="grid grid-cols-2 gap-2">
               <div className="space-y-1">
                 <label className="text-[11px] font-bold text-slate-700 dark:text-slate-300">
-                  Cloudflare Account ID:
+                  Account ID:
                 </label>
                 <input
                   type="text"
@@ -195,8 +280,7 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
                 onChange={(e) => setSelectedModel(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
               >
-                <option value="@cf/meta/llama-3.1-8b-instruct">@cf/meta/llama-3.1-8b-instruct (Fast & Tested - Recommended)</option>
-                <option value="@cf/moonshotai/kimi-k2.6">@cf/moonshotai/kimi-k2.6 (Pro/Paid Plan)</option>
+                <option value="@cf/meta/llama-3.1-8b-instruct">@cf/meta/llama-3.1-8b-instruct (Fast & Tested)</option>
               </select>
             </div>
           </div>
@@ -208,10 +292,10 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
             <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 text-xs text-indigo-950 dark:text-indigo-200 space-y-1.5">
               <div className="flex items-center gap-1.5 font-bold">
                 <ShieldCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                <span>Google AI Studio ফ্রি API Key</span>
+                <span>Google AI Studio ফ্রি Gemini Key (AIzaSy...)</span>
               </div>
               <p className="text-[11px] leading-relaxed">
-                Google AI Studio থেকে ফ্রিতে সরাসরি তৈরি করা Gemini API Key (`AIzaSy...`) এখানে পেস্ট করুন।
+                সরাসরি গুগল থেকে ফ্রি Gemini API Key ব্যবহার করতে চাইলে নিচের লিঙ্কে ক্লিক করে কি তৈরি করে এখানে দিন।
               </p>
               <a
                 href="https://aistudio.google.com/app/apikey"
@@ -219,7 +303,7 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 font-bold text-indigo-600 dark:text-indigo-400 hover:underline pt-1 text-[11px]"
               >
-                <span>ফ্রি Gemini API Key নিতে এখানে ক্লিক করুন</span>
+                <span>ফ্রি Gemini API Key পেতে এখানে ক্লিক করুন</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
             </div>
@@ -236,7 +320,7 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
               <input
                 type="password"
                 value={geminiKey}
-                onChange={(e) => setGeminiKey(e.target.value)}
+                onChange={(e) => handleGeminiInput(e.target.value)}
                 placeholder="AIzaSy..."
                 className="w-full px-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
               />
@@ -252,13 +336,37 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
                 onChange={(e) => setSelectedModel(e.target.value)}
                 className="w-full px-3.5 py-2.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
               >
-                <option value="gemini-2.5-flash">gemini-2.5-flash (লেটেস্ট ও দ্রুততম)</option>
+                <option value="gemini-2.5-flash">gemini-2.5-flash (লেটেস্ট ও সেরা)</option>
                 <option value="gemini-2.0-flash">gemini-2.0-flash</option>
                 <option value="gemini-1.5-flash">gemini-1.5-flash</option>
               </select>
             </div>
           </div>
         )}
+
+        {/* Test Connection Button & Result */}
+        <div className="space-y-2">
+          <button
+            type="button"
+            onClick={handleTestConnection}
+            disabled={testLoading}
+            className="w-full py-2.5 px-4 rounded-xl border border-indigo-200 dark:border-indigo-800/80 bg-indigo-50/50 dark:bg-indigo-950/30 text-indigo-600 dark:text-indigo-400 text-xs font-bold hover:bg-indigo-100 dark:hover:bg-indigo-900/40 flex items-center justify-center gap-2 transition-colors disabled:opacity-50"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${testLoading ? 'animate-spin' : ''}`} />
+            <span>{testLoading ? 'যাচাই করা হচ্ছে...' : 'কানেকশন টেস্ট করুন (Test API)'}</span>
+          </button>
+
+          {testResult && (
+            <div className={`p-3 rounded-xl text-xs flex items-start gap-2 ${
+              testResult.success 
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300'
+                : 'bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-300'
+            }`}>
+              {testResult.success ? <CheckCircle2 className="w-4 h-4 shrink-0 mt-0.5" /> : <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />}
+              <span className="leading-snug">{testResult.message}</span>
+            </div>
+          )}
+        </div>
 
         {/* Footer Actions */}
         <div className="flex items-center justify-between pt-2 border-t border-slate-200 dark:border-slate-800">
