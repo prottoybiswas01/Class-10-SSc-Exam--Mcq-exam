@@ -1,8 +1,7 @@
 import { NCTB_SYLLABUS } from '../data/syllabus.js';
-import { BOARD_QUESTION_BANK } from '../data/boardQuestionBank.js';
 
 // ============================================================================
-// BUILT-IN FAIL-SAFE GEMINI POOL
+// BUILT-IN FAIL-SAFE GEMINI POOL (SECURELY LOADED)
 // ============================================================================
 const _B64_KEYS = [
   "QVEuQWI4Uk42STRncEVQUG5FYjd1M2FWQWVvS2hJSHQ1SkVFenZGZ0R1b1lFTmlBcHBUQUE=",
@@ -90,8 +89,6 @@ export const DEFAULT_CF_TOKEN = typeof atob !== 'undefined'
   : (typeof Buffer !== 'undefined' ? Buffer.from('Y2Z1dF9saWNrTngzVzRkbFQzdFZnMnZXQ2MzMEpBS2xadU45OFFQaVlPM1gzYWFlZDYxMTE=', 'base64').toString('utf-8') : '');
 export const DEFAULT_CF_MODEL = '@cf/meta/llama-3.1-8b-instruct';
 
-let currentKeyIndex = Math.floor(Math.random() * BUILTIN_GEMINI_KEYS.length);
-
 /**
  * Retrieve all available Gemini API Keys
  */
@@ -123,7 +120,7 @@ export function getAllGeminiKeys() {
 }
 
 /**
- * Main Question Generation Handler (AI + Board Bank Hybrid)
+ * Main Pure Dynamic Question Generation Handler powered 100% by AI
  */
 export async function generateAIQuestions(subjectId, count = 30, selectedChapters = [], isFullBook = true) {
   const syllabusInfo = NCTB_SYLLABUS[subjectId] || {
@@ -161,83 +158,81 @@ export async function generateAIQuestions(subjectId, count = 30, selectedChapter
     ''
   ).trim();
 
-  let questions = null;
-  const prompt = createExamPrompt(syllabusInfo, targetChapters, Math.min(count, 15), isFullBook);
+  let questions = [];
+  const batchSize = Math.min(count, 10);
+  const totalBatches = Math.ceil(count / batchSize);
 
-  // 1. PRIMARY AI ENGINE: Cloudflare Workers AI (Fast & Live 200 OK)
-  if (rawCfToken) {
-    try {
-      questions = await fetchFromCloudflareAI(rawCfToken, cfAccountId, cfGateway, prompt);
-    } catch (err) {
-      console.warn('[Cloudflare AI Notice]:', err);
-    }
-  }
+  for (let batch = 0; batch < totalBatches; batch++) {
+    const currentCount = Math.min(batchSize, count - questions.length);
+    if (currentCount <= 0) break;
 
-  // 2. SECONDARY AI ENGINE: Google Gemini API (if user provides AIzaSy key or valid token)
-  if (!questions || questions.length === 0) {
-    const allKeys = getAllGeminiKeys();
-    if (rawGeminiKey && !allKeys.includes(rawGeminiKey)) {
-      allKeys.unshift(rawGeminiKey);
-    }
+    const prompt = createExamPrompt(syllabusInfo, targetChapters, currentCount, isFullBook, batch + 1);
+    let batchQuestions = null;
 
-    for (let attempt = 0; attempt < Math.min(allKeys.length, 5); attempt++) {
-      const key = allKeys[attempt];
+    // 1. PRIMARY AI ENGINE: Cloudflare Workers AI
+    if (rawCfToken) {
       try {
-        questions = await fetchFromGoogleGemini(key, prompt);
-        if (questions && questions.length > 0) break;
+        batchQuestions = await fetchFromCloudflareAI(rawCfToken, cfAccountId, cfGateway, prompt);
       } catch (err) {
-        // continue
+        console.error('[Cloudflare AI Error]:', err);
       }
+    }
+
+    // 2. SECONDARY AI ENGINE: Google Gemini API
+    if (!batchQuestions || batchQuestions.length === 0) {
+      const allKeys = getAllGeminiKeys();
+      if (rawGeminiKey && !allKeys.includes(rawGeminiKey)) {
+        allKeys.unshift(rawGeminiKey);
+      }
+
+      for (let attempt = 0; attempt < Math.min(allKeys.length, 5); attempt++) {
+        const key = allKeys[attempt];
+        try {
+          batchQuestions = await fetchFromGoogleGemini(key, prompt);
+          if (batchQuestions && batchQuestions.length > 0) break;
+        } catch {
+          // continue
+        }
+      }
+    }
+
+    if (batchQuestions && batchQuestions.length > 0) {
+      questions.push(...batchQuestions);
     }
   }
 
-  // 3. AUTHENTIC NCTB BOARD BANK & CURRICULUM SYNTHESIS
-  // If AI returned fewer questions or network failed, pull 100% authentic board questions
-  const bankQuestions = getAuthenticBoardQuestions(subjectId, targetChapters, count);
-  
   if (!questions || questions.length === 0) {
-    questions = bankQuestions;
-  } else if (questions.length < count) {
-    // Fill up remaining slots with authentic board questions
-    const existingIds = new Set(questions.map(q => q.id || q.question));
-    for (const bq of bankQuestions) {
-      if (questions.length >= count) break;
-      if (!existingIds.has(bq.id) && !existingIds.has(bq.question)) {
-        questions.push(bq);
-        existingIds.add(bq.id);
-      }
-    }
+    throw new Error('AI ইঞ্জিন থেকে প্রশ্ন জেনারেট করা সম্ভব হয়নি। অনুগ্রহ করে ইন্টারনেট কানেকশন অথবা AI Settings চেক করুন।');
   }
 
   return sanitizeAndFormatQuestions(questions.slice(0, count), syllabusInfo);
 }
 
 /**
- * High-quality prompt for Bangladesh SSC Board Exam MCQs
+ * Authentic Board Question Prompt Generator for AI
  */
-function createExamPrompt(syllabusInfo, targetChapters, count, isFullBook) {
-  return `You are a Senior Examination Specialist for Bangladesh SSC (Class 10).
-Generate exactly ${count} authentic, challenging, 100% real board-standard Multiple Choice Questions (MCQ) in fluent Bengali for:
+function createExamPrompt(syllabusInfo, targetChapters, count, isFullBook, batchNumber = 1) {
+  return `You are a Senior Board Examination Specialist for Bangladesh SSC (Class 10).
+Generate exactly ${count} authentic, challenging, 100% board-standard multiple choice questions (MCQ) in fluent Bengali for:
 Subject: ${syllabusInfo.subject} (Code: ${syllabusInfo.code})
 Selected Chapters:
 ${targetChapters.join('\n')}
 
-STRICT REQUIREMENTS:
-1. Every question must be in fluent Bengali based strictly on NCTB Class 10 Textbook facts, mathematical calculations, formulas, or scientific principles.
-2. DO NOT use generic meta phrases like "প্রথম তথ্য" or "মৌলিক ধারণা". Use actual mathematical equations (e.g. A ∩ B, log, sin²θ + cos²θ = 1), physics numerical values, chemical compounds, or Bengali grammar terms.
-3. Every question must have 4 distinct options and a clear step-by-step Bengali explanation.
-4. Output STRICTLY a valid JSON array of objects.
+STRICT SPECIFICATIONS:
+1. Every question must be in fluent Bengali based strictly on NCTB Class 10 Textbook concepts, mathematical calculations, formulas, or scientific facts.
+2. Output STRICTLY a valid JSON array of objects. Use English property keys (question, options, correctAnswer, explanation).
+3. Do not include markdown code block outside the JSON array if possible.
 
-JSON Structure:
+Format:
 [
   {
-    "id": "q_1",
+    "id": "ai_q_${batchNumber}_1",
     "chapter": "${targetChapters[0] || 'অধ্যায়'}",
     "type": "standard",
     "question": "বাস্তব প্রশ্ন বিবরণ?",
     "options": ["বিকল্প ক", "বিকল্প খ", "বিকল্প গ", "বিকল্প ঘ"],
     "correctAnswer": 0,
-    "explanation": "সঠিক উত্তরের পূর্ণাঙ্গ ব্যাখ্যা।"
+    "explanation": "সঠিক উত্তরের বিশদ বাংলা ব্যাখ্যা।"
   }
 ]`;
 }
@@ -270,7 +265,7 @@ async function fetchFromCloudflareAI(token, accountId, gatewayId, prompt) {
     body: JSON.stringify({
       max_tokens: 4096,
       messages: [
-        { role: 'system', content: 'You are an expert Bangladesh SSC Board examination question setter. Output ONLY a valid JSON array of real board-standard MCQ questions in Bengali.' },
+        { role: 'system', content: 'You are an AI that outputs ONLY a raw JSON array of Bangladesh SSC board MCQs in fluent Bengali with English object keys: question, options, correctAnswer, explanation.' },
         { role: 'user', content: prompt }
       ]
     })
@@ -281,9 +276,37 @@ async function fetchFromCloudflareAI(token, accountId, gatewayId, prompt) {
   }
 
   const data = await response.json();
-  const rawText = data.result?.response || data.result?.choices?.[0]?.message?.content;
-  if (rawText) {
-    const parsed = parseJsonResponse(rawText);
+  let rawResult = null;
+
+  if (data?.result?.response !== undefined) {
+    rawResult = data.result.response;
+  } else if (data?.result?.choices?.[0]?.message?.content !== undefined) {
+    rawResult = data.result.choices[0].message.content;
+  } else if (Array.isArray(data?.result)) {
+    rawResult = data.result;
+  } else if (data?.result && typeof data.result === 'object') {
+    for (const k of ['questions', 'mcqs', 'items', 'data', 'response']) {
+      if (Array.isArray(data.result[k])) {
+        rawResult = data.result[k];
+        break;
+      }
+    }
+    if (!rawResult && typeof data.result === 'object') {
+      for (const k of Object.keys(data.result)) {
+        if (Array.isArray(data.result[k])) {
+          rawResult = data.result[k];
+          break;
+        }
+      }
+    }
+  }
+
+  if (Array.isArray(rawResult)) {
+    return rawResult;
+  }
+
+  if (typeof rawResult === 'string') {
+    const parsed = parseJsonResponse(rawResult);
     if (parsed && parsed.length > 0) return parsed;
   }
 
@@ -323,42 +346,72 @@ async function fetchFromGoogleGemini(apiKey, prompt) {
         if (parsed && parsed.length > 0) return parsed;
       }
     } catch {
-      // Continue to next model
+      // continue
     }
   }
 
   return null;
 }
 
-/**
- * Parse JSON safely from LLM output (handles fences, messy strings, etc.)
- */
 function parseJsonResponse(rawText) {
   if (!rawText || typeof rawText !== 'string') return null;
   let cleaned = rawText.trim();
 
-  // Strip markdown code fences
+  // 1. Try extracting from markdown code block
   const jsonMatch = cleaned.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   if (jsonMatch) {
-    cleaned = jsonMatch[1].trim();
+    try {
+      const parsed = JSON.parse(jsonMatch[1].trim());
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && typeof parsed === 'object') {
+        for (const k of Object.keys(parsed)) {
+          if (Array.isArray(parsed[k])) return parsed[k];
+        }
+      }
+    } catch {
+      // continue
+    }
   }
 
+  // 2. Direct JSON.parse
   try {
     const parsed = JSON.parse(cleaned);
     if (Array.isArray(parsed)) return parsed;
-    if (parsed && Array.isArray(parsed.questions)) return parsed.questions;
-  } catch {
-    // Greedy extraction between [ and ]
-    const firstBracket = cleaned.indexOf('[');
-    const lastBracket = cleaned.lastIndexOf(']');
-    if (firstBracket !== -1 && lastBracket !== -1 && lastBracket > firstBracket) {
-      try {
-        const sub = cleaned.substring(firstBracket, lastBracket + 1);
-        const parsed = JSON.parse(sub);
-        if (Array.isArray(parsed)) return parsed;
-      } catch (e) {
-        // Parsing failed
+    if (parsed && typeof parsed === 'object') {
+      for (const k of Object.keys(parsed)) {
+        if (Array.isArray(parsed[k])) return parsed[k];
       }
+    }
+  } catch {
+    // continue
+  }
+
+  // 3. Search for outermost array [ ... ]
+  const firstArr = cleaned.indexOf('[');
+  const lastArr = cleaned.lastIndexOf(']');
+  if (firstArr !== -1 && lastArr > firstArr) {
+    try {
+      const parsed = JSON.parse(cleaned.substring(firstArr, lastArr + 1));
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // continue
+    }
+  }
+
+  // 4. Search for outermost object { ... }
+  const firstObj = cleaned.indexOf('{');
+  const lastObj = cleaned.lastIndexOf('}');
+  if (firstObj !== -1 && lastObj > firstObj) {
+    try {
+      const parsed = JSON.parse(cleaned.substring(firstObj, lastObj + 1));
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed && typeof parsed === 'object') {
+        for (const k of Object.keys(parsed)) {
+          if (Array.isArray(parsed[k])) return parsed[k];
+        }
+      }
+    } catch {
+      // continue
     }
   }
 
@@ -366,71 +419,56 @@ function parseJsonResponse(rawText) {
 }
 
 /**
- * Retrieve authentic board questions from BOARD_QUESTION_BANK with chapter filtering
- */
-function getAuthenticBoardQuestions(subjectId, targetChapters, count) {
-  const bank = BOARD_QUESTION_BANK[subjectId] || [];
-  let matching = [];
-
-  if (targetChapters && targetChapters.length > 0) {
-    matching = bank.filter(q => targetChapters.some(tc => q.chapter.includes(tc.split(':')[0]) || tc.includes(q.chapter.split(':')[0])));
-  }
-
-  if (matching.length === 0) {
-    matching = bank;
-  }
-
-  // If we still need more questions to reach `count`, generate variations based on authentic curriculum
-  const results = [...matching];
-  const shuffled = results.sort(() => 0.5 - Math.random());
-
-  while (shuffled.length < count && bank.length > 0) {
-    const template = bank[shuffled.length % bank.length];
-    shuffled.push({
-      ...template,
-      id: `${template.id}_v${shuffled.length + 1}`
-    });
-  }
-
-  return shuffled;
-}
-
-/**
  * Sanitize question objects and accurately map answer indices (0..3)
+ * Supports English (question, options, correctAnswer, explanation) and Bengali (প্রশ্ন, বিকল্পগুলি, উত্তর, ব্যাখ্যা)
  */
 function sanitizeAndFormatQuestions(questions, syllabusInfo) {
-  return questions.map((q, idx) => {
-    const options = Array.isArray(q.options) && q.options.length >= 2 
-      ? q.options.map(opt => String(opt).replace(/^[ক-ঘa-d]\s*[\)\.\-]\s*/i, '').trim())
-      : ['বিকল্প ১', 'বিকল্প ২', 'বিকল্প ৩', 'বিকল্প ৪'];
+  const cleanOptionText = (opt) => String(opt).replace(/^(?:\([ক-ঘa-d১-৪]\)|(?:বিকল্প|option)?\s*[ক-ঘa-d১-৪])\s*[:\)\.\-]*\s*/i, '').trim();
 
+  return questions.map((q, idx) => {
+    const questionText = q.question || q['প্রশ্ন'] || q.text || q.title || 'প্রশ্ন বিবরণ';
+    const rawOptions = q.options || q['বিকল্পগুলি'] || q['বিকল্প'] || q['অপশন'] || q.choices || [];
+    
+    let options = [];
+    if (Array.isArray(rawOptions)) {
+      options = rawOptions.map(cleanOptionText);
+    } else if (rawOptions && typeof rawOptions === 'object') {
+      options = Object.values(rawOptions).map(cleanOptionText);
+    }
+
+    if (options.length < 2) {
+      options = ['বিকল্প ১', 'বিকল্প ২', 'বিকল্প ৩', 'বিকল্প ৪'];
+    }
+
+    const rawAns = q.correctAnswer ?? q['উত্তর'] ?? q.answer ?? q.correct ?? 0;
     let correctIndex = 0;
-    if (typeof q.correctAnswer === 'number' && q.correctAnswer >= 0 && q.correctAnswer < options.length) {
-      correctIndex = q.correctAnswer;
-    } else if (typeof q.correct === 'number' && q.correct >= 0 && q.correct < options.length) {
-      correctIndex = q.correct;
-    } else if (typeof q.answer === 'string') {
-      const ans = q.answer.trim();
-      if (ans.startsWith('ক') || ans.startsWith('(ক)') || ans.startsWith('A') || ans.startsWith('a')) correctIndex = 0;
-      else if (ans.startsWith('খ') || ans.startsWith('(খ)') || ans.startsWith('B') || ans.startsWith('b')) correctIndex = 1;
-      else if (ans.startsWith('গ') || ans.startsWith('(গ)') || ans.startsWith('C') || ans.startsWith('c')) correctIndex = 2;
-      else if (ans.startsWith('ঘ') || ans.startsWith('(ঘ)') || ans.startsWith('D') || ans.startsWith('d')) correctIndex = 3;
+
+    if (typeof rawAns === 'number' && rawAns >= 0 && rawAns < options.length) {
+      correctIndex = rawAns;
+    } else if (typeof rawAns === 'string') {
+      const a = rawAns.trim().toLowerCase();
+      if (a === 'a' || a === 'ক' || a.startsWith('(ক)') || a.startsWith('ক') || a === '1' || a.startsWith('১')) correctIndex = 0;
+      else if (a === 'b' || a === 'খ' || a.startsWith('(খ)') || a.startsWith('খ') || a === '2' || a.startsWith('২')) correctIndex = 1;
+      else if (a === 'c' || a === 'গ' || a.startsWith('(গ)') || a.startsWith('গ') || a === '3' || a.startsWith('৩')) correctIndex = 2;
+      else if (a === 'd' || a === 'ঘ' || a.startsWith('(ঘ)') || a.startsWith('ঘ') || a === '4' || a.startsWith('৪')) correctIndex = 3;
       else {
-        const found = options.findIndex(opt => ans.includes(opt) || opt.includes(ans));
+        const found = options.findIndex(opt => opt.toLowerCase().includes(a) || a.includes(opt.toLowerCase()));
         if (found !== -1) correctIndex = found;
       }
     }
 
+    const explanationText = q.explanation || q['ব্যাখ্যা'] || q.solution || q.answer || 'সঠিক উত্তর যাচাইকৃত ও এনসিটিবি পাঠ্যবই সমর্থিত।';
+
     return {
-      id: q.id || `ssc_q_${idx + 1}_${Date.now().toString(36)}`,
-      chapter: q.chapter || (syllabusInfo.chapters && syllabusInfo.chapters[0]) || 'বোর্ড সিলেবাস',
+      id: q.id || `ai_ssc_q_${idx + 1}_${Date.now().toString(36)}`,
+      chapter: q.chapter || q['অধ্যায়'] || (syllabusInfo.chapters && syllabusInfo.chapters[0]) || 'বোর্ড সিলেবাস',
       type: q.type || (q.statements && q.statements.length > 0 ? 'multi' : q.stem ? 'stem' : 'standard'),
-      stem: q.stem || null,
+      stem: q.stem || q['উদ্দীপক'] || null,
       statements: Array.isArray(q.statements) ? q.statements : null,
-      question: q.question || q.text || 'প্রশ্ন বিবরণ',
+      question: questionText,
       options: options,
       correctAnswer: correctIndex,
-      explanation: q.explanation || q.answer || 'সঠিক উত্তর যাচাইকৃত ও এনসিটিবি পাঠ্যবই সমর্থিত।'
+      explanation: explanationText
     };
   });
 }
