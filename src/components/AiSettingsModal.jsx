@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { X, Key, Sparkles, CheckCircle2, AlertCircle, ExternalLink, Cpu, Cloud, ShieldCheck, RefreshCw } from 'lucide-react';
+import { BUILTIN_GEMINI_KEYS, DEFAULT_CF_TOKEN } from '../services/aiQuestionGenerator.js';
 
 export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
-  const [provider, setProvider] = useState('cloudflare'); // 'google' | 'cloudflare'
+  const [provider, setProvider] = useState('google'); // 'google' | 'cloudflare'
   const [geminiKey, setGeminiKey] = useState('');
   const [cfToken, setCfToken] = useState('');
   const [cfAccountId, setCfAccountId] = useState('4856aab769ba28fe73b35aee65e3abc0');
   const [cfGateway, setCfGateway] = useState('default');
-  const [selectedModel, setSelectedModel] = useState('@cf/meta/llama-3.1-8b-instruct');
+  const [selectedModel, setSelectedModel] = useState('gemini-2.5-flash');
   
   const [testLoading, setTestLoading] = useState(false);
   const [testResult, setTestResult] = useState(null); // { success: boolean, message: string }
@@ -19,7 +20,7 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
       let storedCfToken = (localStorage.getItem('ssc_mcq_cf_token_v1') || import.meta.env.VITE_CLOUDFLARE_AI_TOKEN || '').trim();
       const storedCfAccount = (localStorage.getItem('ssc_mcq_cf_account_id_v1') || import.meta.env.VITE_CLOUDFLARE_ACCOUNT_ID || '4856aab769ba28fe73b35aee65e3abc0').trim();
       const storedCfGateway = (localStorage.getItem('ssc_mcq_cf_gateway_v1') || import.meta.env.VITE_CLOUDFLARE_GATEWAY_NAME || 'default').trim();
-      const storedModel = (localStorage.getItem('ssc_mcq_gemini_model_v1') || import.meta.env.VITE_AI_MODEL || '@cf/meta/llama-3.1-8b-instruct').trim();
+      const storedModel = (localStorage.getItem('ssc_mcq_gemini_model_v1') || import.meta.env.VITE_AI_MODEL || 'gemini-2.5-flash').trim();
 
       // Auto-migrate misplaced cfut_ token
       if (storedGemini.startsWith('cfut_') && !storedCfToken) {
@@ -37,9 +38,9 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
       setTestResult(null);
       setSavedStatus(null);
 
-      if (storedCfToken) {
+      if (storedModel.startsWith('@cf/')) {
         setProvider('cloudflare');
-      } else if (storedGemini) {
+      } else {
         setProvider('google');
       }
     }
@@ -59,7 +60,7 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
 
   const handleCfInput = (val) => {
     setCfToken(val);
-    if (val.trim().startsWith('AIzaSy')) {
+    if (val.trim().startsWith('AIzaSy') || val.trim().startsWith('AQ.')) {
       setGeminiKey(val.trim());
       setCfToken('');
       setProvider('google');
@@ -73,7 +74,7 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
 
     try {
       if (provider === 'cloudflare') {
-        const token = cfToken.trim();
+        const token = cfToken.trim() || import.meta.env.VITE_CLOUDFLARE_AI_TOKEN || DEFAULT_CF_TOKEN || '';
         if (!token) throw new Error('Cloudflare API Token দিন।');
         
         const headers = {
@@ -99,12 +100,16 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
         }
         setTestResult({ success: true, message: 'Cloudflare AI সফলভাবে কানেক্টেড ও সচল!' });
       } else {
-        const key = geminiKey.trim();
+        const key = geminiKey.trim() || import.meta.env.VITE_GEMINI_API_KEY || (BUILTIN_GEMINI_KEYS && BUILTIN_GEMINI_KEYS[0]) || '';
         if (!key) throw new Error('Google Gemini API Key দিন।');
 
-        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${key}`, {
+        const cleanModel = selectedModel.startsWith('@cf/') ? 'gemini-2.5-flash' : selectedModel;
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${cleanModel}:generateContent?key=${key}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'x-goog-api-key': key
+          },
           body: JSON.stringify({
             contents: [{ role: 'user', parts: [{ text: 'Say OK' }] }]
           })
@@ -114,7 +119,7 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
           const err = await res.json().catch(() => ({}));
           throw new Error(err.error?.message || `Google API Error (${res.status})`);
         }
-        setTestResult({ success: true, message: 'Google Gemini AI সফলভাবে কানেক্টেড ও সচল!' });
+        setTestResult({ success: true, message: 'Google Gemini AI (৬৮টি কি এর লোড ব্যালেন্সারসহ) সফলভাবে কানেক্টেড ও সচল!' });
       }
     } catch (err) {
       setTestResult({ success: false, message: err.message });
@@ -295,11 +300,11 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
           <div className="space-y-4 animate-fade-in">
             <div className="p-3.5 rounded-2xl bg-indigo-50/70 dark:bg-indigo-950/40 border border-indigo-200 dark:border-indigo-800/60 text-xs text-indigo-950 dark:text-indigo-200 space-y-1.5">
               <div className="flex items-center gap-1.5 font-bold">
-                <ShieldCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                <span>Google AI Studio ফ্রি Gemini Key (AIzaSy...)</span>
+                <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <span>Google Gemini AI (৬৮টি কি এর অটোমেটিক রোটেটিং পুল সক্রিয়)</span>
               </div>
               <p className="text-[11px] leading-relaxed">
-                সরাসরি গুগল থেকে ফ্রি Gemini API Key ব্যবহার করতে চাইলে নিচের লিঙ্কে ক্লিক করে কি তৈরি করে এখানে দিন।
+                আপনার প্রদত্ত সকল ৬৮টি জেমিনি এপিআই কি লোড ব্যালেন্সার এবং অটোমেটিক ফেইলওভার পুলে যুক্ত রয়েছে। আপনি চাইলে যেকোনো নিজস্ব অতিরিক্ত Key ও এখানে যোগ করতে পারেন।
               </p>
               <a
                 href="https://aistudio.google.com/app/apikey"
@@ -307,14 +312,14 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
                 rel="noopener noreferrer"
                 className="inline-flex items-center gap-1 font-bold text-indigo-600 dark:text-indigo-400 hover:underline pt-1 text-[11px]"
               >
-                <span>ফ্রি Gemini API Key পেতে এখানে ক্লিক করুন</span>
+                <span>Google AI Studio ড্যাশবোর্ড দেখুন</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
             </div>
 
             <div className="space-y-1.5">
               <label className="text-xs font-bold text-slate-700 dark:text-slate-300 flex items-center justify-between">
-                <span>Google Gemini API Key:</span>
+                <span>কাস্টম Gemini API Key (ঐচ্ছিক):</span>
                 {savedStatus === 'saved' && (
                   <span className="text-emerald-600 dark:text-emerald-400 flex items-center gap-1 text-[11px]">
                     <CheckCircle2 className="w-3.5 h-3.5" /> সেভ হয়েছে!
@@ -325,7 +330,7 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
                 type="password"
                 value={geminiKey}
                 onChange={(e) => handleGeminiInput(e.target.value)}
-                placeholder="AIzaSy..."
+                placeholder="AQ.Ab8RN... বা AIzaSy... (ডিফল্ট ৬৮টি কি সক্রিয়)"
                 className="w-full px-4 py-2.5 rounded-2xl bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-xs font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
               />
             </div>
