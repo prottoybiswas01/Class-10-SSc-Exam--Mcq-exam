@@ -76,13 +76,17 @@ export default function AiSettingsModal({ isOpen, onClose, onKeySaved }) {
         const token = cfToken.trim();
         if (!token) throw new Error('Cloudflare API Token দিন।');
         
+        const headers = {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        };
+        if (cfGateway && cfGateway !== 'default') {
+          headers['cf-aig-gateway-id'] = cfGateway;
+        }
+
         const res = await fetch(`https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/ai/run/${selectedModel}`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`,
-            'cf-aig-gateway-id': cfGateway
-          },
+          headers,
           body: JSON.stringify({
             max_tokens: 50,
             messages: [{ role: 'user', content: 'Say "OK" in Bengali' }]
